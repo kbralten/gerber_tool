@@ -1,0 +1,24 @@
+{
+  "name": "gerber_tool",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "postinstall": "patch-package"
+  },
+  "devDependencies": {
+    "patch-package": "^8.0.1",
+    "typescript": "~5.9.3",
+    "vite": "^7.3.1"
+  },
+  "dependencies": {
+    "@tracespace/parser": "5.0.0-next.0",
+    "@tracespace/plotter": "5.0.0-alpha.0",
+    "@tracespace/renderer": "5.0.0-alpha.0",
+    "hast-util-to-html": "^9.0.5",
+    "jszip": "^3.10.1"
+  }
+}

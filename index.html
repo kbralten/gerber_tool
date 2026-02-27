@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gerber Viewer</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@500;700&display=swap" rel="stylesheet">
+  </head>
+  <body>
+    <!-- Drag & Drop Overlay -->
+    <div id="drop-zone" class="drop-zone hidden">
+      <div class="drop-content">
+        <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="file-icon"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="M12 18v-6"/><path d="m9 15 3-3 3 3"/></svg>
+        <h2>Drop files here</h2>
+        <p>Drag and drop .gbr, .drl, or a .zip file containing Gerber files.</p>
+      </div>
+    </div>
+
+    <div class="app-layout">
+      <!-- Sidebar / Controls -->
+      <aside class="sidebar">
+        <header class="app-header">
+          <h1>Gerber Viewer</h1>
+          <p class="subtitle">Drag & Drop PCB Viewer</p>
+        </header>
+        
+        <div class="controls-section">
+          <h2>Layers</h2>
+          <div id="layers-list" class="layers-list">
+            <!-- Dynamically populated checkboxes will go here -->
+            <div class="empty-state">
+              <p>No layers loaded yet.</p>
+              <button id="browse-btn" class="primary-btn">Browse Files</button>
+              <input type="file" id="file-input" multiple accept=".gbr,.drl,.gbl,.gtl,.gbs,.gts,.gko,.gbrjob,.txt,.zip" class="hidden-input" />
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Main Viewer Area -->
+      <main class="viewer-area">
+        <div id="canvas-container" class="canvas-container">
+          <!-- SVGs will be injected here -->
+        </div>
+        <!-- Viewer controls (Zoom, Pan reset) -->
+         <div class="viewer-tools hidden" id="viewer-tools">
+            <button id="zoom-in" title="Zoom In">+</button>
+            <button id="zoom-out" title="Zoom Out">-</button>
+            <button id="reset-view" title="Reset View">⤢</button>
+         </div>
+      </main>
+    </div>
+
+    <!-- Feedback Toast -->
+    <div id="toast" class="toast hidden"></div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

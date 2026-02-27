@@ -1,0 +1,26 @@
+diff --git a/node_modules/@tracespace/plotter/dist/tracespace-plotter.js b/node_modules/@tracespace/plotter/dist/tracespace-plotter.js
+index 522435d..a80c010 100644
+--- a/node_modules/@tracespace/plotter/dist/tracespace-plotter.js
++++ b/node_modules/@tracespace/plotter/dist/tracespace-plotter.js
+@@ -448,7 +448,7 @@ function ye(t, e) {
+   return { type: S, erase: n === 0, cx: a, cy: p, r: i };
+ }
+ function he(t, e) {
+-  const [n, r, c, s, o, i, a] = e, [p, f] = [i - s, o - c], u = r / 2, l = Math.sqrt(p ** 2 + f ** 2), [y, h] = [u * f / l, u * p / l];
++  const [n, r, c, s, o, i, a] = e, [p, f] = [i - s, o - c], u = r / 2, l = Math.sqrt(p ** 2 + f ** 2), [y, h] = [-u * p / l, -u * f / l];
+   return {
+     type: M,
+     erase: n === 0,
+diff --git a/node_modules/@tracespace/plotter/src/graphic-plotter/plot-macro.ts b/node_modules/@tracespace/plotter/src/graphic-plotter/plot-macro.ts
+index 0364d80..ff7a0d0 100644
+--- a/node_modules/@tracespace/plotter/src/graphic-plotter/plot-macro.ts
++++ b/node_modules/@tracespace/plotter/src/graphic-plotter/plot-macro.ts
+@@ -143,7 +143,7 @@ function plotVectorLine(
+   const [dy, dx] = [ey - sy, ex - sx]
+   const halfWid = width / 2
+   const dist = Math.sqrt(dy ** 2 + dx ** 2)
+-  const [xOff, yOff] = [(halfWid * dx) / dist, (halfWid * dy) / dist]
++  const [xOff, yOff] = [(-halfWid * dy) / dist, (-halfWid * dx) / dist]
+ 
+   return {
+     type: Tree.POLYGON,
