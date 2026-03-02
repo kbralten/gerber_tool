@@ -551,3 +551,31 @@ svg.tracespace-render {
 .hidden {
   display: none !important;
 }
+
+/* Sidebar Footer */
+.sidebar-footer {
+  padding: 16px 24px;
+  border-top: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.github-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+}
+
+.github-link:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--border);
+}
