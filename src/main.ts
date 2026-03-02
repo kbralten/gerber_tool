@@ -38,6 +38,7 @@ interface LayerData {
   filetype: string;
   bbox: [number, number, number, number]; // [minX, minY, maxX, maxY] in native units
   units: 'in' | 'mm';
+  color: string;
 }
 
 // --- State ---
@@ -50,6 +51,7 @@ const state = {
   isDragging: false,
   dragStartX: 0,
   dragStartY: 0,
+  draggedLayerId: null as string | null, // For layer reordering
 };
 
 // --- DOM Elements ---
@@ -196,7 +198,13 @@ async function processGerberText(filename: string, content: string) {
     let units: 'in' | 'mm' = 'in';
 
     const layerType = guessLayerType(filename);
-    const color = LAYER_COLORS[layerType] ?? LAYER_COLORS.other;
+    const existingCount = state.layers.filter(l => l.type === layerType).length;
+    let color = LAYER_COLORS[layerType] ?? LAYER_COLORS.other;
+    
+    // Shift color if multiple of the same type exist
+    if (existingCount > 0) {
+      color = getShiftedColor(color, existingCount);
+    }
 
     // --- Try custom drill parser first for known drill file formats ---
     if (isDrillFile(filename, content)) {
@@ -214,6 +222,7 @@ async function processGerberText(filename: string, content: string) {
           filetype: 'drill',
           bbox: nativeBBox,
           units,
+          color,
         });
         updateGlobalBBox();
         return;
@@ -314,11 +323,84 @@ async function processGerberText(filename: string, content: string) {
       filetype: ast.filetype ?? 'unknown',
       bbox: nativeBBox,
       units,
+      color,
     });
     updateGlobalBBox();
   } catch (err) {
     console.warn(`Failed to render ${shortName}:`, err);
   }
+}
+
+// Helper to shift a hex color's hue
+function getShiftedColor(hex: string, index: number): string {
+  // Convert hex to RGB
+  let r = 0, g = 0, b = 0;
+  if (hex.length === 4) {
+    r = parseInt(hex[1] + hex[1], 16);
+    g = parseInt(hex[2] + hex[2], 16);
+    b = parseInt(hex[3] + hex[3], 16);
+  } else if (hex.length === 7) {
+    r = parseInt(hex.substring(1, 3), 16);
+    g = parseInt(hex.substring(3, 5), 16);
+    b = parseInt(hex.substring(5, 7), 16);
+  }
+  
+  // Convert RGB to HSL
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0, l = (max + min) / 2;
+
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+      case g: h = (b - r) / d + 2; break;
+      case b: h = (r - g) / d + 4; break;
+    }
+    h /= 6;
+  }
+
+  // Shift hue (or adjust lightness if grayscale like white/grey)
+  if (s < 0.1) {
+    // If it's grayscale (e.g. silkscreen), just darken/lighten it a bit
+    l = Math.max(0.2, l - (index * 0.15));
+    // add a tiny bit of saturation and hue shift so it's not strictly grey forever
+    s = 0.3;
+    h = (index * 0.1) % 1.0;
+  } else {
+    // Shift hue by ~45 degrees (0.125) per index
+    h = (h + (index * 0.15)) % 1.0;
+    // Vary lightness slightly to add distinction
+    l = Math.max(0.3, Math.min(0.7, l + (index % 2 === 0 ? 0.1 : -0.1)));
+  }
+
+  // Convert HSL back to RGB
+  let r2, g2, b2;
+  if (s === 0) {
+    r2 = g2 = b2 = l;
+  } else {
+    const hue2rgb = (p: number, q: number, t: number) => {
+      if (t < 0) t += 1;
+      if (t > 1) t -= 1;
+      if (t < 1/6) return p + (q - p) * 6 * t;
+      if (t < 1/2) return q;
+      if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+      return p;
+    };
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    r2 = hue2rgb(p, q, h + 1/3);
+    g2 = hue2rgb(p, q, h);
+    b2 = hue2rgb(p, q, h - 1/3);
+  }
+
+  const toHex = (x: number) => {
+    const hex = Math.round(x * 255).toString(16);
+    return hex.length === 1 ? '0' + hex : hex;
+  };
+  
+  return `#${toHex(r2)}${toHex(g2)}${toHex(b2)}`;
 }
 
 function updateGlobalBBox() {
@@ -361,10 +443,13 @@ function renderSidebar() {
   let html = '<div class="layers-header"><span>Toggle All</span><label class="toggle-switch"><input type="checkbox" id="toggle-all" checked><span class="slider"></span></label></div>';
 
   for (const layer of state.layers) {
-    const color = LAYER_COLORS[layer.type] ?? LAYER_COLORS.other;
+    const color = layer.color;
     const icon = LAYER_ICONS[layer.type] ?? '◇';
     html += `
-      <div class="layer-item" data-id="${layer.id}">
+      <div class="layer-item" data-id="${layer.id}" draggable="true">
+        <div class="layer-drag-handle">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+        </div>
         <div class="layer-info" title="${layer.filename}">
           <span class="layer-color-dot" style="background:${color}"></span>
           <span class="layer-icon">${icon}</span>
@@ -394,6 +479,78 @@ function renderSidebar() {
     cb.addEventListener('change', () => {
       const layer = state.layers.find(l => l.id === cb.getAttribute('data-id'));
       if (layer) { layer.visible = cb.checked; renderCanvas(); }
+    });
+  });
+
+  // Bind Layer Reordering Drag & Drop
+  const items = layersList.querySelectorAll<HTMLDivElement>('.layer-item');
+  items.forEach(item => {
+    item.addEventListener('dragstart', (e) => {
+      const id = item.getAttribute('data-id');
+      if (id) {
+        state.draggedLayerId = id;
+        item.classList.add('dragging');
+        if (e.dataTransfer) {
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', id);
+        }
+      }
+    });
+
+    item.addEventListener('dragend', () => {
+      state.draggedLayerId = null;
+      item.classList.remove('dragging');
+      items.forEach(i => i.classList.remove('drag-over-top', 'drag-over-bottom'));
+    });
+
+    item.addEventListener('dragover', (e) => {
+      e.preventDefault(); // Necessary to allow dropping
+      if (!state.draggedLayerId || state.draggedLayerId === item.getAttribute('data-id')) return;
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+
+      const rect = item.getBoundingClientRect();
+      const relY = e.clientY - rect.top;
+      // Determine if dragging over top half or bottom half
+      if (relY < rect.height / 2) {
+        item.classList.add('drag-over-top');
+        item.classList.remove('drag-over-bottom');
+      } else {
+        item.classList.add('drag-over-bottom');
+        item.classList.remove('drag-over-top');
+      }
+    });
+
+    item.addEventListener('dragleave', () => {
+      item.classList.remove('drag-over-top', 'drag-over-bottom');
+    });
+
+    item.addEventListener('drop', (e) => {
+      e.preventDefault();
+      item.classList.remove('drag-over-top', 'drag-over-bottom');
+      const draggedId = state.draggedLayerId;
+      const targetId = item.getAttribute('data-id');
+      if (!draggedId || !targetId || draggedId === targetId) return;
+
+      const draggedIndex = state.layers.findIndex(l => l.id === draggedId);
+      const targetIndex = state.layers.findIndex(l => l.id === targetId);
+      if (draggedIndex === -1 || targetIndex === -1) return;
+
+      const rect = item.getBoundingClientRect();
+      const relY = e.clientY - rect.top;
+      let newIndex = targetIndex;
+      if (relY >= rect.height / 2) {
+         // Insert after
+         newIndex++;
+      }
+      
+      // Moving downwards vs upwards affects the insertion index if we remove first
+      if (draggedIndex < newIndex) {
+        newIndex--; // We are removing an element before the new index
+      }
+
+      const [draggedLayer] = state.layers.splice(draggedIndex, 1);
+      state.layers.splice(newIndex, 0, draggedLayer);
+      updateUI();
     });
   });
 
@@ -440,7 +597,7 @@ function renderCanvas() {
 
   // Render each visible layer
   visibleLayers.forEach((layer) => {
-    const color = LAYER_COLORS[layer.type] ?? LAYER_COLORS.other;
+    const color = layer.color;
     const div = document.createElement('div');
     div.className = 'layer-svg-wrap';
     div.innerHTML = layer.svgString;
@@ -654,7 +811,7 @@ async function exportSvg() {
     const globalSumMM = maxY + minY;
 
     for (const layer of visibleLayers) {
-      const color = LAYER_COLORS[layer.type] ?? LAYER_COLORS.other;
+      const color = layer.color;
 
       // Create a temporary SVG that renders the layer filled with black on transparent background
       // so we can easily threshold the alpha channel.

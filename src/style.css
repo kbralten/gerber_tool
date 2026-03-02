@@ -115,6 +115,41 @@ h1, h2, h3 {
   border-color: var(--border);
 }
 
+.layer-item[draggable="true"] {
+  cursor: grab;
+}
+
+.layer-item[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.layer-item.dragging {
+  opacity: 0.5;
+  border: 1px dashed var(--accent);
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.layer-item.drag-over-top {
+  border-top: 2px solid var(--accent);
+}
+
+.layer-item.drag-over-bottom {
+  border-bottom: 2px solid var(--accent);
+}
+
+.layer-drag-handle {
+  cursor: grab;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.5;
+  transition: opacity 0.2s;
+}
+.layer-item:hover .layer-drag-handle {
+  opacity: 1;
+}
+
 .layers-header {
   display: flex;
   justify-content: space-between;
