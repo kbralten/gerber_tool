@@ -4,6 +4,7 @@ import { createParser } from '@tracespace/parser';
 import { plot } from '@tracespace/plotter';
 import { render } from '@tracespace/renderer';
 import { toHtml } from 'hast-util-to-html';
+import { contours } from 'd3-contour';
 import { parseDrillToSvg, isDrillFile } from './drill-parser';
 
 // --- Layer Color Palette ---
@@ -380,8 +381,9 @@ function renderSidebar() {
   }
 
   html += `<div class="sidebar-actions">
-    <button id="add-more-btn" class="secondary-btn">+ Add More</button>
-    <button id="clear-all-btn" class="danger-btn">Clear All</button>
+    <button id="add-more-btn" class="secondary-btn">+ Add</button>
+    <button id="export-svg-btn" class="primary-btn" style="margin-top:0; flex:1; padding: 8px 6px; font-size: 0.85rem;">Export</button>
+    <button id="clear-all-btn" class="danger-btn">Clear</button>
   </div>`;
 
   layersList.innerHTML = html;
@@ -409,6 +411,8 @@ function renderSidebar() {
     updateUI();
     showToast('All layers cleared.');
   });
+
+  document.getElementById('export-svg-btn')?.addEventListener('click', exportSvg);
 }
 
 function renderCanvas() {
@@ -582,3 +586,176 @@ function showLoading() {
 function hideLoading() {
   document.getElementById('loading-overlay')?.remove();
 }
+
+/** 
+ * Promisify loading an image from an SVG string 
+ */
+function loadImageDataFromSvg(svgString: string, width: number, height: number): Promise<ImageData | null> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) return resolve(null);
+      // Fill white background to trace black/dark areas if needed, or just let transparent be transparent
+      ctx.clearRect(0, 0, width, height);
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(ctx.getImageData(0, 0, width, height));
+    };
+    img.onerror = () => resolve(null);
+    const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(svgBlob);
+    img.src = url;
+  });
+}
+
+/**
+ * Builds SVG path 'd' string from GeoJSON MultiPolygon coordinates
+ */
+function geoJsonToSvgPath(coordinates: number[][][][]): string {
+  let d = '';
+  for (const polygon of coordinates) {
+    for (let i = 0; i < polygon.length; i++) {
+      const ring = polygon[i];
+      if (ring.length === 0) continue;
+      d += `M ${ring[0][0]},${ring[0][1]} `;
+      for (let j = 1; j < ring.length; j++) {
+        d += `L ${ring[j][0]},${ring[j][1]} `;
+      }
+      d += 'Z ';
+    }
+  }
+  return d;
+}
+
+async function exportSvg() {
+  const visibleLayers = state.layers.filter(l => l.visible);
+  if (visibleLayers.length === 0 || !state.globalBBox) {
+    showToast('No layers to export.');
+    return;
+  }
+
+  showLoading();
+
+  try {
+    const [minX, minY, maxX, maxY] = state.globalBBox;
+    const globalWidth = maxX - minX;
+    const globalHeight = maxY - minY;
+    const globalViewBox = `${minX} ${minY} ${globalWidth} ${globalHeight}`;
+
+    let svgContent = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${globalViewBox}" width="100%" height="100%">\n`;
+
+    // Resolution: pixels per mm
+    const resolution = 80; 
+    const pxWidth = Math.ceil(globalWidth * resolution);
+    const pxHeight = Math.ceil(globalHeight * resolution);
+    const globalSumMM = maxY + minY;
+
+    for (const layer of visibleLayers) {
+      const color = LAYER_COLORS[layer.type] ?? LAYER_COLORS.other;
+
+      // Create a temporary SVG that renders the layer filled with black on transparent background
+      // so we can easily threshold the alpha channel.
+      const div = document.createElement('div');
+      div.innerHTML = layer.svgString;
+      const parsedSvgNode = div.querySelector('svg');
+      if (!parsedSvgNode) continue;
+
+      const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      if (layer.type === 'drill') {
+        g.setAttribute('transform', `translate(0, ${globalSumMM}) scale(1, -1)`);
+      } else {
+        if (layer.units === 'in') {
+          g.setAttribute('transform', `translate(0, ${globalSumMM}) scale(25.4)`);
+        } else {
+          g.setAttribute('transform', `translate(0, ${globalSumMM})`);
+        }
+      }
+
+      while (parsedSvgNode.firstChild) {
+        g.appendChild(parsedSvgNode.firstChild);
+      }
+      parsedSvgNode.appendChild(g);
+
+      // Force everything to black so alpha is strong
+      parsedSvgNode.querySelectorAll('path, rect, circle, polygon, polyline').forEach(el => {
+        const fillVal = el.getAttribute('fill');
+        if (fillVal && fillVal !== 'none' && fillVal !== 'transparent') {
+          el.setAttribute('fill', '#000000');
+        }
+        const strokeVal = el.getAttribute('stroke');
+        if (strokeVal && strokeVal !== 'none') {
+          el.setAttribute('stroke', '#000000');
+        }
+      });
+
+      // Wrap it in a proper sized SVG string for canvas rasterization
+      parsedSvgNode.setAttribute('viewBox', globalViewBox);
+      parsedSvgNode.setAttribute('width', pxWidth.toString());
+      parsedSvgNode.setAttribute('height', pxHeight.toString());
+      
+      const xmlSerializer = new XMLSerializer();
+      const blackSvgString = xmlSerializer.serializeToString(parsedSvgNode);
+
+      const imgData = await loadImageDataFromSvg(blackSvgString, pxWidth, pxHeight);
+      if (!imgData) continue;
+
+      // Extract alpha channel
+      const values = new Array(pxWidth * pxHeight);
+      for (let i = 0, n = pxWidth * pxHeight; i < n; ++i) {
+        values[i] = imgData.data[i * 4 + 3]; // Alpha channel (0-255)
+      }
+
+      // Trace contours using d3-contour (threshold at alpha=128)
+      const contourList = contours()
+        .size([pxWidth, pxHeight])
+        .thresholds([128])
+        (values);
+
+      // Add paths to final SVG, converting contour pixel coordinates back to native mm
+      svgContent += `  <g class="layer-wrap" fill="${color}" stroke="${color}" stroke-width="0.01">\n`;
+      
+      for (const contour of contourList) {
+        if (!contour.coordinates || contour.coordinates.length === 0) continue;
+        
+        // Scale down to mm and translate back to [minX, minY]
+        const nativeCoordinates = contour.coordinates.map(polygon => 
+          polygon.map(ring => 
+            ring.map(point => [
+              (point[0] / resolution) + minX,
+              (point[1] / resolution) + minY
+            ])
+          )
+        );
+
+        const pathData = geoJsonToSvgPath(nativeCoordinates);
+        if (pathData) {
+          svgContent += `    <path d="${pathData}" />\n`;
+        }
+      }
+      
+      svgContent += `  </g>\n`;
+    }
+
+    svgContent += `</svg>`;
+
+    const blob = new Blob([svgContent], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'gerber-export.svg';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast('Exported SVG successfully.');
+  } catch (err) {
+    console.error("Export failed:", err);
+    showToast('Export failed. Check console.');
+  } finally {
+    hideLoading();
+  }
+}
+
